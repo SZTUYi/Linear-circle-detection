@@ -38,12 +38,17 @@ def calculate_pixel_values(img, points, pixel_interval):
 def calculate_gradient(pixel_values):
     return [np.diff(np.concatenate(([values[0]], values), axis=0), axis=0).astype(int) for values in pixel_values]
 
-def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_values):
+def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_values, flag='all'):
     color_img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     all_midpoints = []
 
     for segment_points, gradients in zip(interpolated_points, gradient_values):
-        max_gradient_index = np.argmax(np.abs(gradients))
+        if flag == 'all':
+            max_gradient_index = np.argmax(np.abs(gradients)) # 查找绝对值最大的值 all
+        elif flag == 'positive':
+            max_gradient_index = np.argmax(gradients)   # 查找最大值 positive 从黑到白
+        elif flag == 'negative':
+            max_gradient_index = np.argmin(gradients)   # 查找最小值 negative 从白到黑
         if max_gradient_index < len(segment_points) - 1:
             midpoint = tuple(map(int, (segment_points[max_gradient_index] + segment_points[max_gradient_index + 1]) / 2))
         else:
@@ -85,6 +90,7 @@ def fit_circle(points):
     return (xc, yc), R
 
 def remove_outliers(points, factor=0.27):
+    """factor: 四分位距倍数，值越小，去除越多离群点，采用四分位距去除离群点"""
     points = np.array(points)
     q1 = np.percentile(points, 25, axis=0)
     q3 = np.percentile(points, 75, axis=0)
@@ -152,8 +158,8 @@ if __name__ == "__main__":
     # initial_radius = 830
     # 23
     image_path = './images/23.png'
-    initial_center = (1200, 980)
-    initial_radius = 120
+    initial_center = (1200, 980) 
+    initial_radius = 100
     # #22
     # image_path = './images/22.png'
     # initial_center = (1180, 1022)

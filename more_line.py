@@ -74,7 +74,7 @@ def fit_line_to_points(points):
 
 
 def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
-    """Remove outliers using the Interquartile Range (IQR) method."""
+    """factor: 四分位距倍数，值越小，去除越多离群点，采用四分位距去除离群点"""
     q1_x, q3_x = np.percentile(points[:, 0], [q1, q3])
     q1_y, q3_y = np.percentile(points[:, 1], [q1, q3])
     
@@ -96,11 +96,16 @@ def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
     
     return inliers, outliers
 
-def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, base_line):
+def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, base_line, flag='all'):
     all_max_points = []
 
     for segment_points, gradients in zip(interpolated_points, gradient_values):
-        max_index = np.argmax(np.abs(gradients))
+        if flag == 'all':
+            max_index = np.argmax(np.abs(gradients))  # 查找绝对值最大的值 all
+        elif flag == 'positive':
+            max_index = np.argmax(gradients)  # 查找最大值 positive 从黑到白
+        elif flag == 'negative':
+            max_index = np.argmin(gradients)  # 查找最小值 negative 从白到黑
         max_point = segment_points[max_index]
         all_max_points.append(max_point)
 
