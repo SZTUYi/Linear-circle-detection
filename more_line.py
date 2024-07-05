@@ -73,34 +73,57 @@ def fit_line_to_points(points):
     return line_point, line_direction
 
 
+def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
+    """Remove outliers using the Interquartile Range (IQR) method."""
+    q1_x, q3_x = np.percentile(points[:, 0], [q1, q3])
+    q1_y, q3_y = np.percentile(points[:, 1], [q1, q3])
+    
+    iqr_x = q3_x - q1_x
+    iqr_y = q3_y - q1_y
+    
+    lower_bound_x = q1_x - iqr_factor * iqr_x
+    upper_bound_x = q3_x + iqr_factor * iqr_x
+    lower_bound_y = q1_y - iqr_factor * iqr_y
+    upper_bound_y = q3_y + iqr_factor * iqr_y
+    
+    inliers_mask = (
+        (points[:, 0] >= lower_bound_x) & (points[:, 0] <= upper_bound_x) &
+        (points[:, 1] >= lower_bound_y) & (points[:, 1] <= upper_bound_y)
+    )
+    
+    inliers = points[inliers_mask]
+    outliers = points[~inliers_mask]
+    
+    return inliers, outliers
+
 def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, base_line):
     all_max_points = []
 
-    # Calculate the maximum gradient point for each segment
     for segment_points, gradients in zip(interpolated_points, gradient_values):
-        # Find the index of the maximum absolute gradient value
         max_index = np.argmax(np.abs(gradients))
         max_point = segment_points[max_index]
         all_max_points.append(max_point)
 
     all_max_points = np.array(all_max_points)
 
-    # Fit a line to the maximum gradient points
-    line_point, line_direction = fit_line_to_points(all_max_points)
+    # Remove outliers
+    inliers, outliers = remove_outliers(all_max_points)
 
-    # Find projections of the base line endpoints onto the fitted line
+    # Fit a line to the inliers
+    line_point, line_direction = fit_line_to_points(inliers)
+
     base_line_start = np.array(base_line[0])
     base_line_end = np.array(base_line[1])
 
     projected_start = project_point_on_line(base_line_start, line_point, line_direction)
     projected_end = project_point_on_line(base_line_end, line_point, line_direction)
 
-    all_max_points = all_max_points.astype(int)
-    projected_start = projected_start.astype(int)
-    projected_end = projected_end.astype(int)
+    inliers = np.round(inliers, decimals=3)
+    outliers = np.round(outliers, decimals=3)
+    projected_start = np.round(projected_start, decimals=3)
+    projected_end = np.round(projected_end, decimals=3)
 
-    return all_max_points, np.array([projected_start, projected_end])
-
+    return inliers, outliers, np.array([projected_start, projected_end])
 
 def generate_parallel_lines(line, interval, half_length):
     start_x, start_y = line[0]
@@ -140,44 +163,48 @@ def generate_parallel_lines(line, interval, half_length):
 
     return np.array(lines)
 
-
 def process_image_with_lines(img, base_line, interval=1, half_length=10, pixel_interval=1):
     points = generate_parallel_lines(base_line, interval, half_length)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
-    max_gradient_points, fitted_line = draw_max_gradient_midpoints(img, points_interpolated,
-                                                                  grad, base_line)
+    inliers, outliers, fitted_line = draw_max_gradient_midpoints(img, points_interpolated, grad, base_line)
 
-    return max_gradient_points, fitted_line
+    # Round the final return values to three decimal places
+    inliers = np.round(inliers, decimals=3)
+    outliers = np.round(outliers, decimals=3)
+    fitted_line = np.round(fitted_line, decimals=3)
+    # 第一个是拟合直线所用的点，第二个是拟合直线的两个端点，第三个是离散点（用不上）
+    return inliers, fitted_line, outliers
 
-
-# Example usage:
 if __name__ == "__main__":
-    # image_path = './images/21.png'
-    # base_line = np.array([[991, 100], [983, 2300]])
-
     image_path = './images/21.png'
-    base_line = np.array([[991, 100], [983, 2300]])
+    # base_line = np.array([[991, 100], [983, 2300]])
+    base_line = np.array([[991, 100], [1003, 2300]])
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     interval = 1
-    half_length = 10
+    half_length = 20
 
-    max_gradient_points, fitted_line = process_image_with_lines(img, base_line, interval, half_length)
-    print("Max Gradient Points:", max_gradient_points)
+    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, interval, half_length)
+    print("Inliers:", inliers)
+    # print("Outliers:", outliers)
     print("Fitted Line Endpoints:", fitted_line)
 
     # Create a color version of the image for visualization
     viz_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
     # Draw the base line
-    # cv2.line(viz_img, tuple(base_line[0]), tuple(base_line[1]), (255, 0, 0), 2)
+    cv2.line(viz_img, tuple(base_line[0]), tuple(base_line[1]), (0, 255, 0), 1)
 
-    # Draw the max gradient points
-    # for point in max_gradient_points:
-    #     cv2.circle(viz_img, tuple(point), 3, (0, 0, 255), -1)
+    # Draw the inliers in green
+    # for point in inliers:
+    #     cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 255, 0), -1)
 
-    # Draw the fitted line
-    cv2.line(viz_img, tuple(fitted_line[0]), tuple(fitted_line[1]), (0,255, 0), 2)
+    # Draw the outliers in red
+    for point in outliers:
+        cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 0, 255), -1)
+
+    # Draw the fitted line in blue
+    cv2.line(viz_img, tuple(fitted_line[0].astype(int)), tuple(fitted_line[1].astype(int)), (255, 0, 0), 1)
 
     # Create a window and display the image
     cv2.namedWindow('Image with Fitted Line', cv2.WINDOW_NORMAL)
