@@ -163,7 +163,8 @@ def generate_parallel_lines(line, interval, half_length):
 
     return np.array(lines)
 
-def process_image_with_lines(img, base_line, interval=1, half_length=10, pixel_interval=1):
+def process_image_with_lines(img, base_line, interval=1, half_length=10, pixel_interval=3):
+    """intrval是直线间隔，half_length是半长，pixel_interval是像素间隔"""
     points = generate_parallel_lines(base_line, interval, half_length)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)

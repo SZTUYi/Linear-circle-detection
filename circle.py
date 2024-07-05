@@ -96,6 +96,7 @@ def remove_outliers(points, factor=0.27):
     return points[mask], points[~mask]
 
 def process_image(image_path, initial_center, initial_radius, angle_interval=1, line_length=20, pixel_interval=1):
+    """angel_interval: 角度间隔，line_length: 线段半长，pixel_interval: 像素间隔"""
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError(f"Unable to read image at {image_path}")
