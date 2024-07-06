@@ -101,14 +101,10 @@ def remove_outliers(points, factor=0.27):
     mask = np.all((points >= lower_bound) & (points <= upper_bound), axis=1)
     return points[mask], points[~mask]
 
-def process_image(image_path, initial_center, initial_radius, angle_interval=1, line_length=20, pixel_interval=1):
+def process_image(img, initial_center, initial_radius, angle_interval=1, line_length=20, pixel_interval=1):
     """angel_interval: 角度间隔，line_length: 线段半长，pixel_interval: 像素间隔"""
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"Unable to read image at {image_path}")
-
     color_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    # cv2.circle(color_img, tuple(map(int, initial_center)), int(initial_radius), (0, 0, 255), 2)
+    cv2.circle(color_img, tuple(map(int, initial_center)), int(initial_radius), (0, 0, 255), 2)
 
     points = generate_radial_lines(initial_center, initial_radius, angle_interval, line_length)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
@@ -142,11 +138,15 @@ def process_image(image_path, initial_center, initial_radius, angle_interval=1, 
 #     image_path = './images/23.png'
 #     initial_center = (1200, 980)
 #     initial_radius = 100
-#     # angle_interval = 1
-#     # line_length = 40
-#     # pixel_interval = 1
+#     angle_interval = 1
+#     line_length = 40
+#     pixel_interval = 1
 
-#     final_center, final_radius = process_image(image_path, initial_center, initial_radius)
+#     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+#     if img is None:
+#         raise ValueError(f"Unable to read image at {image_path}")
+
+#     final_center, final_radius = process_image(img, initial_center, initial_radius)
 #     print(f"Fitted circle center: {final_center}")
 #     print(f"Fitted circle radius: {final_radius}")
 
@@ -165,10 +165,10 @@ if __name__ == "__main__":
     # initial_center = (1180, 1022)
     # initial_radius = 100
     # #20
-    # image_path = './images/20.png'
+    image_path = './images/20.png'
     # initial_center = (903, 817)
-    # # initial_center = (923, 817)
-    # initial_radius = 120
+    initial_center = (883, 817)
+    initial_radius = 100
     angle_interval = 1
     line_length = 40
     pixel_interval = 1
@@ -181,7 +181,6 @@ if __name__ == "__main__":
     # angle_interval = 1
     # line_length = 30
     # pixel_interval = 1
-
 
     # Read the image
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
