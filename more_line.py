@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from scipy import ndimage
+import math
 
 def calculate_pixel_values(img, points, pixel_interval):
     height, width = img.shape
@@ -46,7 +48,15 @@ def calculate_gradient(pixel_values):
     gradient_values = []
     for values in pixel_values:
         combined = np.concatenate(([values[0]], values), axis=0)
+        # print(combined)
+        # print("-------------------------------")
+        combined = ndimage.gaussian_filter1d(combined, sigma=2)
+        # print(combined)
         gradient = np.diff(combined, axis=0)
+        # print(gradient)
+        # print("-------------------------------")
+        gradient = gradient * 2 * pow(2*math.pi, 0.5)
+        # print(gradient)
         gradient = np.round(gradient).astype(int)
         gradient_values.append(gradient)
     return gradient_values
@@ -74,7 +84,7 @@ def fit_line_to_points(points):
 
 
 def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
-    """factor: 四分位距倍数，值越小，去除越多离群点，采用四分位距去除离群点"""
+    """Remove outliers using the Interquartile Range (IQR) method."""
     q1_x, q3_x = np.percentile(points[:, 0], [q1, q3])
     q1_y, q3_y = np.percentile(points[:, 1], [q1, q3])
     
@@ -97,17 +107,25 @@ def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
     return inliers, outliers
 
 def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, base_line, flag='all'):
+    """Draw the midpoints of the segments with the maximum gradient."""
     all_max_points = []
-
     for segment_points, gradients in zip(interpolated_points, gradient_values):
         if flag == 'all':
             max_index = np.argmax(np.abs(gradients))  # 查找绝对值最大的值 all
+            # print(max_index)
         elif flag == 'positive':
             max_index = np.argmax(gradients)  # 查找最大值 positive 从黑到白
+            # print(max_index)
+            print('positive')
         elif flag == 'negative':
             max_index = np.argmin(gradients)  # 查找最小值 negative 从白到黑
+            # print(max_index)
+            print('negative')
+
         max_point = segment_points[max_index]
+        # print(max_point)
         all_max_points.append(max_point)
+        # print(all_max_points)
 
     all_max_points = np.array(all_max_points)
 
@@ -166,14 +184,21 @@ def generate_parallel_lines(line, interval, half_length):
         lines.append([start_perp_x, start_perp_y])  # start point
         lines.append([end_perp_x, end_perp_y])  # end point
 
+    # print(np.array(lines))
     return np.array(lines)
 
-def process_image_with_lines(img, base_line, interval=1, half_length=10, pixel_interval=3):
+
+def process_image_with_lines(img, base_line, position, interval=1, half_length=10, pixel_interval=3):
     """intrval是直线间隔，half_length是半长，pixel_interval是像素间隔"""
     points = generate_parallel_lines(base_line, interval, half_length)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
-    inliers, outliers, fitted_line = draw_max_gradient_midpoints(img, points_interpolated, grad, base_line)
+    # print(grad)
+    if position == '上' or position == '右':
+        flag = 'positive'
+    elif position == '下' or position == '左':
+        flag = 'negative'
+    inliers, outliers, fitted_line = draw_max_gradient_midpoints(img, points_interpolated, grad, base_line,flag)
 
     # Round the final return values to three decimal places
     inliers = np.round(inliers, decimals=3)
@@ -183,14 +208,29 @@ def process_image_with_lines(img, base_line, interval=1, half_length=10, pixel_i
     return inliers, fitted_line, outliers
 
 if __name__ == "__main__":
-    image_path = './images/21.png'
+
+    image_path = './images/pzd1.png'
+    base_line = np.array([[100,970], [1700, 970]])
+    position = '上'
+
+    image_path = './images/pzd3.png'
+    base_line = np.array([[1050, 100], [1050, 2300]])
+    position = '右'
+
+    image_path = './images/pzd4.png'
     # base_line = np.array([[991, 100], [983, 2300]])
-    base_line = np.array([[991, 100], [1003, 2300]])
+    base_line = np.array([[971, 10], [963, 2400]])
+    position = '左'
+
+    image_path = './images/pzd2.png'
+    base_line = np.array([[100,1070], [1700, 1070]])
+    position = '下'
+
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     interval = 1
     half_length = 20
 
-    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, interval, half_length)
+    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, position, interval, half_length)
     print("Inliers:", inliers)
     # print("Outliers:", outliers)
     print("Fitted Line Endpoints:", fitted_line)
@@ -199,15 +239,15 @@ if __name__ == "__main__":
     viz_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
     # Draw the base line
-    cv2.line(viz_img, tuple(base_line[0]), tuple(base_line[1]), (0, 255, 0), 1)
+    # cv2.line(viz_img, tuple(base_line[0]), tuple(base_line[1]), (0, 255, 0), 1)
 
     # Draw the inliers in green
     # for point in inliers:
     #     cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 255, 0), -1)
 
     # Draw the outliers in red
-    for point in outliers:
-        cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 0, 255), -1)
+    # for point in outliers:
+    #     cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 0, 255), -1)
 
     # Draw the fitted line in blue
     cv2.line(viz_img, tuple(fitted_line[0].astype(int)), tuple(fitted_line[1].astype(int)), (255, 0, 0), 1)
