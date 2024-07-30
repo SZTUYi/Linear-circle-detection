@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from scipy.signal import find_peaks
 
 def calculate_pixel_values(img, points, pixel_interval):
     height, width = img.shape
@@ -38,17 +39,55 @@ def calculate_pixel_values(img, points, pixel_interval):
 def calculate_gradient(pixel_values):
     return [np.diff(np.concatenate(([values[0]], values), axis=0), axis=0).astype(int) for values in pixel_values]
 
-def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_values, flag='all'):
+def find_first_peak(gradients, peak_threshold=10, valley_type='all'):
+    gradients = np.array(gradients).flatten()
+
+    if valley_type == 'negative':
+        # 寻找负峰谷（向下的谷）
+        peaks, _ = find_peaks(-gradients, height=peak_threshold)
+        if len(peaks) > 0:
+            return int(peaks[0])
+        else:
+            # 如果没有找到峰值，返回最小值的索引
+            return int(np.argmin(gradients))
+
+    elif valley_type == 'positive':
+        # 寻找正峰谷（向上的峰）
+        peaks, _ = find_peaks(gradients, height=peak_threshold)
+        if len(peaks) > 0:
+            return int(peaks[0])
+        else:
+            # 如果没有找到峰值，返回最大值的索引
+            return int(np.argmax(gradients))
+
+    elif valley_type == 'all':
+        # 寻找正峰和负谷
+        positive_peaks, _ = find_peaks(gradients, height=peak_threshold)
+        negative_peaks, _ = find_peaks(-gradients, height=peak_threshold)
+
+        # 如果都没找到，返回绝对值最大的点的索引
+        if len(positive_peaks) == 0 and len(negative_peaks) == 0:
+            return int(np.argmax(np.abs(gradients)))
+
+        # 如果只找到一种类型的峰，返回第一个
+        if len(positive_peaks) == 0:
+            return int(negative_peaks[0])
+        if len(negative_peaks) == 0:
+            return int(positive_peaks[0])
+
+        # 如果两种都找到了，返回最先出现的那个
+        return int(min(positive_peaks[0], negative_peaks[0]))
+
+    else:
+        raise ValueError("valley_type must be 'positive', 'negative', or 'both'")
+
+def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_values, flag='all', peak_threshold=10):
     color_img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     all_midpoints = []
-
+    # print(gradient_values)
     for segment_points, gradients in zip(interpolated_points, gradient_values):
-        if flag == 'all':
-            max_gradient_index = np.argmax(np.abs(gradients)) # 查找绝对值最大的值 all
-        elif flag == 'positive':
-            max_gradient_index = np.argmax(gradients)   # 查找最大值 positive 从黑到白
-        elif flag == 'negative':
-            max_gradient_index = np.argmin(gradients)   # 查找最小值 negative 从白到黑
+        max_gradient_index = find_first_peak(gradients, peak_threshold, valley_type=flag)
+        print(f"Max index ({flag}): {max_gradient_index}, Value: {gradients[max_gradient_index]}")
         if max_gradient_index < len(segment_points) - 1:
             midpoint = tuple(map(int, (segment_points[max_gradient_index] + segment_points[max_gradient_index + 1]) / 2))
         else:
@@ -101,7 +140,7 @@ def remove_outliers(points, factor=0.27):
     mask = np.all((points >= lower_bound) & (points <= upper_bound), axis=1)
     return points[mask], points[~mask]
 
-def process_image(img, initial_center, initial_radius, angle_interval=1, line_length=20, pixel_interval=1):
+def process_image(img, initial_center, initial_radius, line_length=20, flag='all', peak_threshold=10, angle_interval=1, pixel_interval=1):
     """angel_interval: 角度间隔，line_length: 线段半长，pixel_interval: 像素间隔"""
     color_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     cv2.circle(color_img, tuple(map(int, initial_center)), int(initial_radius), (0, 0, 255), 2)
@@ -109,7 +148,7 @@ def process_image(img, initial_center, initial_radius, angle_interval=1, line_le
     points = generate_radial_lines(initial_center, initial_radius, angle_interval, line_length)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
-    _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad)
+    _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad, flag, peak_threshold)
     
     midpoints, removed_points = remove_outliers(midpoints)
     fitted_center, fitted_radius = fit_circle(midpoints)
@@ -117,7 +156,7 @@ def process_image(img, initial_center, initial_radius, angle_interval=1, line_le
     points = generate_radial_lines(fitted_center, fitted_radius, angle_interval, line_length-10)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
-    _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad)
+    _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad, flag, peak_threshold)
     
     midpoints, removed_points = remove_outliers(midpoints)
     final_fitted_center, final_fitted_radius = fit_circle(midpoints)
@@ -134,128 +173,130 @@ def process_image(img, initial_center, initial_radius, angle_interval=1, line_le
 
     return final_fitted_center, final_fitted_radius
 
-# if __name__ == "__main__":
-#     image_path = './images/23.png'
-#     initial_center = (1200, 980)
-#     initial_radius = 100
-#     angle_interval = 1
-#     line_length = 40
-#     pixel_interval = 1
-
-#     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-#     if img is None:
-#         raise ValueError(f"Unable to read image at {image_path}")
-
-#     final_center, final_radius = process_image(img, initial_center, initial_radius)
-#     print(f"Fitted circle center: {final_center}")
-#     print(f"Fitted circle radius: {final_radius}")
-
 if __name__ == "__main__":
-
-    # initial_center = (2785, 2750)
-    # initial_radius = 880
-    # initial_center = (2792, 2761)
-    # initial_radius = 830
-    # 23
     image_path = './images/23.png'
-    initial_center = (1200, 980) 
+    initial_center = (1200, 980)
     initial_radius = 100
-    # #22
-    # image_path = './images/22.png'
-    # initial_center = (1180, 1022)
-    # initial_radius = 100
-    # #20
-    image_path = './images/20.png'
-    # initial_center = (903, 817)
-    initial_center = (883, 817)
-    initial_radius = 100
-    angle_interval = 1
+    angle_interval = 2
     line_length = 40
     pixel_interval = 1
+    flag = 'negative'
+    peak_threshold = 20
 
-    # 20
-    # image_path = './images/20.png'
-    # initial_center = (1220, 1026)
-    # initial_radius = 100
-    #
-    # angle_interval = 1
-    # line_length = 30
-    # pixel_interval = 1
-
-    # Read the image
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError(f"Unable to read image at {image_path}")
 
-    # Create a color image for drawing
-    color_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    final_center, final_radius = process_image(img, initial_center, initial_radius, line_length, flag, peak_threshold)
+    print(f"Fitted circle center: {final_center}")
+    print(f"Fitted circle radius: {final_radius}")
 
-    # 初始圆 (red)
-    cv2.circle(color_img, (int(initial_center[0]), int(initial_center[1])), int(initial_radius), (0, 0, 255), 2)
-
-    # 圆上的线 (yellow)
-    points = generate_radial_lines(initial_center, initial_radius, angle_interval, line_length)
-    points = points.reshape(-1, points.shape[-1])
-    # for i in range(0, len(points), 2):
-    #     start_point = (int(points[i][0]), int(points[i][1]))
-    #     end_point = (int(points[i + 1][0]), int(points[i + 1][1]))
-    #     cv2.line(color_img, start_point, end_point, (0, 255, 255), 1)
-
-    # First iteration
-    img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
-    grad = calculate_gradient(pixel_values)
-    _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad)
-    print(len(midpoints))
-    midpoints, removed_points = remove_outliers(midpoints)
-    print(len(midpoints))
-
-    # # 保留的点（参与拟合）t (Green)
-    # for point in midpoints:
-    #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 255, 0), -1)  # Green
-    #
-    # # 去除的点 (Red)
-    # for point in removed_points:
-    #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 0, 255), -1)  # Red
-
-    fitted_center, fitted_radius = fit_circle(midpoints)
-    
-    print(f"Fitted circle center1_____________________________________________: {fitted_center}")
-    print(f"Fitted circle radius1_____________________________________________: {fitted_radius}")
-
-    # 第一次拟合的圆 (blue)
-    # cv2.circle(color_img, (int(fitted_center[0]), int(fitted_center[1])), int(fitted_radius), (255, 0, 0), 2)
-
-    # Second iteration using the fitted circle from the first iteration
-    points = generate_radial_lines(fitted_center, fitted_radius, angle_interval, line_length-10)
-    img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
-    grad = calculate_gradient(pixel_values)
-    _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad)
-    print(len(midpoints))
-    midpoints, removed_points = remove_outliers(midpoints)
-    print(len(midpoints))
-
-    # # 保留的点（参与拟合） (Orange)
-    # for point in midpoints:
-    #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 165, 255), -1)  # Orange
-    #
-    # # 去除的点 (Red)
-    # for point in removed_points:
-    #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 0, 255), -1)  # Red
-
-    final_fitted_center, final_fitted_radius = fit_circle(midpoints)
-
-    # Round the results to one decimal place
-    final_fitted_center = (round(final_fitted_center[0], 3), round(final_fitted_center[1], 3))
-    final_fitted_radius = round(final_fitted_radius, 3)
-
-    # 二次拟合的圆(green)
-    cv2.circle(color_img, (int(final_fitted_center[0]), int(final_fitted_center[1])), int(final_fitted_radius),(0, 255, 0), 2)
-
-    # Display the result
-    cv2.namedWindow("Circle Fitting Result", cv2.WINDOW_NORMAL)
-    cv2.imshow("Circle Fitting Result", color_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-    print(f"Fitted circle center2_____________________________________________: {final_fitted_center}")
-    print(f"Fitted circle radius2_____________________________________________: {final_fitted_radius}")
+# if __name__ == "__main__":
+#
+#     # initial_center = (2785, 2750)
+#     # initial_radius = 880
+#     # initial_center = (2792, 2761)
+#     # initial_radius = 830
+#     # 23
+#     image_path = './images/23.png'
+#     initial_center = (1200, 980)
+#     initial_radius = 100
+#     # #22
+#     # image_path = './images/22.png'
+#     # initial_center = (1180, 1022)
+#     # initial_radius = 100
+#     # #20
+#     image_path = './images/20.png'
+#     # initial_center = (903, 817)
+#     initial_center = (883, 817)
+#     initial_radius = 100
+#     angle_interval = 30
+#     line_length = 40
+#     pixel_interval = 1
+#
+#     # 20
+#     # image_path = './images/20.png'
+#     # initial_center = (1220, 1026)
+#     # initial_radius = 100
+#     #
+#     # angle_interval = 1
+#     # line_length = 30
+#     # pixel_interval = 1
+#
+#     # Read the image
+#     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+#     if img is None:
+#         raise ValueError(f"Unable to read image at {image_path}")
+#
+#     # Create a color image for drawing
+#     color_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+#
+#     # 初始圆 (red)
+#     cv2.circle(color_img, (int(initial_center[0]), int(initial_center[1])), int(initial_radius), (0, 0, 255), 2)
+#
+#     # 圆上的线 (yellow)
+#     points = generate_radial_lines(initial_center, initial_radius, angle_interval, line_length)
+#     points = points.reshape(-1, points.shape[-1])
+#     # for i in range(0, len(points), 2):
+#     #     start_point = (int(points[i][0]), int(points[i][1]))
+#     #     end_point = (int(points[i + 1][0]), int(points[i + 1][1]))
+#     #     cv2.line(color_img, start_point, end_point, (0, 255, 255), 1)
+#
+#     # First iteration
+#     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
+#     grad = calculate_gradient(pixel_values)
+#     _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad)
+#     print(len(midpoints))
+#     midpoints, removed_points = remove_outliers(midpoints)
+#     print(len(midpoints))
+#
+#     # # 保留的点（参与拟合）t (Green)
+#     # for point in midpoints:
+#     #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 255, 0), -1)  # Green
+#     #
+#     # # 去除的点 (Red)
+#     # for point in removed_points:
+#     #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 0, 255), -1)  # Red
+#
+#     fitted_center, fitted_radius = fit_circle(midpoints)
+#
+#     print(f"Fitted circle center1_____________________________________________: {fitted_center}")
+#     print(f"Fitted circle radius1_____________________________________________: {fitted_radius}")
+#
+#     # 第一次拟合的圆 (blue)
+#     # cv2.circle(color_img, (int(fitted_center[0]), int(fitted_center[1])), int(fitted_radius), (255, 0, 0), 2)
+#
+#     # Second iteration using the fitted circle from the first iteration
+#     points = generate_radial_lines(fitted_center, fitted_radius, angle_interval, line_length-10)
+#     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
+#     grad = calculate_gradient(pixel_values)
+#     _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad)
+#     print(len(midpoints))
+#     midpoints, removed_points = remove_outliers(midpoints)
+#     print(len(midpoints))
+#
+#     # # 保留的点（参与拟合） (Orange)
+#     # for point in midpoints:
+#     #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 165, 255), -1)  # Orange
+#     #
+#     # # 去除的点 (Red)
+#     # for point in removed_points:
+#     #     cv2.circle(color_img, (int(point[0]), int(point[1])), 2, (0, 0, 255), -1)  # Red
+#
+#     final_fitted_center, final_fitted_radius = fit_circle(midpoints)
+#
+#     # Round the results to one decimal place
+#     final_fitted_center = (round(final_fitted_center[0], 3), round(final_fitted_center[1], 3))
+#     final_fitted_radius = round(final_fitted_radius, 3)
+#
+#     # 二次拟合的圆(green)
+#     cv2.circle(color_img, (int(final_fitted_center[0]), int(final_fitted_center[1])), int(final_fitted_radius),(0, 255, 0), 2)
+#
+#     # Display the result
+#     cv2.namedWindow("Circle Fitting Result", cv2.WINDOW_NORMAL)
+#     cv2.imshow("Circle Fitting Result", color_img)
+#     cv2.waitKey(0)
+#     cv2.destroyAllWindows()
+#
+#     print(f"Fitted circle center2_____________________________________________: {final_fitted_center}")
+#     print(f"Fitted circle radius2_____________________________________________: {final_fitted_radius}")
