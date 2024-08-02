@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
+import math
 from sklearn.linear_model import LinearRegression
 from scipy import ndimage
-import math
+from scipy.signal import find_peaks
 
 def calculate_pixel_values(img, points, pixel_interval):
     height, width = img.shape
@@ -106,23 +107,62 @@ def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
     
     return inliers, outliers
 
-def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, base_line, flag='all'):
+
+def find_first_peak(gradients, peak_threshold=10, valley_type='all'):
+    gradients = np.array(gradients).flatten()
+
+    if valley_type == 'negative':
+        # 寻找负峰谷（向下的谷）
+        peaks, _ = find_peaks(-gradients, height=peak_threshold)
+        if len(peaks) > 0:
+            return int(peaks[0])
+        else:
+            # 如果没有找到峰值，返回最小值的索引
+            return int(np.argmin(gradients))
+
+    elif valley_type == 'positive':
+        # 寻找正峰谷（向上的峰）
+        peaks, _ = find_peaks(gradients, height=peak_threshold)
+        if len(peaks) > 0:
+            return int(peaks[0])
+        else:
+            # 如果没有找到峰值，返回最大值的索引
+            return int(np.argmax(gradients))
+
+    elif valley_type == 'all':
+        # 寻找正峰和负谷
+        positive_peaks, _ = find_peaks(gradients, height=peak_threshold)
+        negative_peaks, _ = find_peaks(-gradients, height=peak_threshold)
+
+        # 如果都没找到，返回绝对值最大的点的索引
+        if len(positive_peaks) == 0 and len(negative_peaks) == 0:
+            return int(np.argmax(np.abs(gradients)))
+
+        # 如果只找到一种类型的峰，返回第一个
+        if len(positive_peaks) == 0:
+            return int(negative_peaks[0])
+        if len(negative_peaks) == 0:
+            return int(positive_peaks[0])
+
+        # 如果两种都找到了，返回最先出现的那个
+        return int(min(positive_peaks[0], negative_peaks[0]))
+
+    else:
+        raise ValueError("valley_type must be 'positive', 'negative', or 'all'")
+
+def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, base_line, peak_threshold=10, flag='all'):
     """Draw the midpoints of the segments with the maximum gradient."""
     all_max_points = []
     for segment_points, gradients in zip(interpolated_points, gradient_values):
-        if flag == 'all':
-            max_index = np.argmax(np.abs(gradients))  # 查找绝对值最大的值 all
-            # print(max_index)
-        elif flag == 'positive':
-            max_index = np.argmax(gradients)  # 查找最大值 positive 从黑到白
-            # print(max_index)
-            print('positive')
-        elif flag == 'negative':
-            max_index = np.argmin(gradients)  # 查找最小值 negative 从白到黑
-            # print(max_index)
-            print('negative')
-
-        max_point = segment_points[max_index]
+        # if flag == 'all':
+        #     max_gradient_index = np.argmax(np.abs(gradients))  # 查找绝对值最大的值 all
+        # elif flag == 'positive':
+        #     max_gradient_index = np.argmax(gradients)  # 查找最大值 positive 从黑到白
+        # elif flag == 'negative':
+        #     max_gradient_index = np.argmin(gradients)  # 查找最小值 negative 从白到黑
+        max_gradient_index = find_first_peak(gradients, peak_threshold, valley_type=flag)
+        print(f"Max index ({flag}): {max_gradient_index}, Value: {gradients[max_gradient_index]}")
+        max_point = segment_points[max_gradient_index]
         # print(max_point)
         all_max_points.append(max_point)
         # print(all_max_points)
@@ -148,57 +188,64 @@ def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, bas
 
     return inliers, outliers, np.array([projected_start, projected_end])
 
-def generate_parallel_lines(line, interval, half_length):
+def generate_parallel_lines(line, interval, half_length, orientation='P'):
     start_x, start_y = line[0]
     end_x, end_y = line[1]
 
-    # Calculate direction vector of the input line
+    # 计算输入线段的方向向量
     dx = end_x - start_x
     dy = end_y - start_y
     length = np.sqrt(dx ** 2 + dy ** 2)
 
-    # Calculate unit direction vector
+    # 计算单位方向向量
     unit_dx = dx / length
     unit_dy = dy / length
 
-    # Calculate perpendicular unit vector
+    # 计算垂直单位向量
     perp_dx = -unit_dy
     perp_dy = unit_dx
 
-    # Calculate number of lines
+    # 计算可以生成的平行线段的数量
     num_lines = int(length / interval) + 1
 
     lines = []
     for i in range(num_lines):
-        # Calculate midpoint
+        # 计算中点
         t = i * interval / length
         mid_x = start_x + t * dx
         mid_y = start_y + t * dy
 
-        # Calculate start and end points of perpendicular line
+        # 计算垂直线段的起点和终点
         start_perp_x = mid_x - half_length * perp_dx
         start_perp_y = mid_y - half_length * perp_dy
         end_perp_x = mid_x + half_length * perp_dx
         end_perp_y = mid_y + half_length * perp_dy
 
-        lines.append([start_perp_x, start_perp_y])  # start point
-        lines.append([end_perp_x, end_perp_y])  # end point
+        if orientation == 'P':
+            # 正向：起点在左侧，终点在右侧
+            lines.append([start_perp_x, start_perp_y])  # 起点
+            lines.append([end_perp_x, end_perp_y])  # 终点
+        elif orientation == 'N':
+            # 逆向：起点在右侧，终点在左侧
+            lines.append([end_perp_x, end_perp_y])  # 起点
+            lines.append([start_perp_x, start_perp_y])  # 终点
+        else:
+            raise ValueError("Invalid orientation value. Use 'P' for positive or 'N' for negative.")
 
-    # print(np.array(lines))
     return np.array(lines)
 
-
-def process_image_with_lines(img, base_line, position, interval=1, half_length=10, pixel_interval=3):
+def process_image_with_lines(img, base_line, flag, interval=1, half_length=10, orientation='P', peak_threshold=10, pixel_interval=3):
     """intrval是直线间隔，half_length是半长，pixel_interval是像素间隔"""
-    points = generate_parallel_lines(base_line, interval, half_length)
+    points = generate_parallel_lines(base_line, interval, half_length, orientation)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
     # print(grad)
-    if position == '上' or position == '右':
-        flag = 'positive'
-    elif position == '下' or position == '左':
-        flag = 'negative'
-    inliers, outliers, fitted_line = draw_max_gradient_midpoints(img, points_interpolated, grad, base_line,flag)
+    # if position == '上' or position == '右':
+    #     flag = 'positive'
+    # elif position == '下' or position == '左':
+    #     flag = 'negative'
+    print(f"Processing image with flag: {flag}")
+    inliers, outliers, fitted_line = draw_max_gradient_midpoints(img, points_interpolated, grad, base_line, peak_threshold, flag)
 
     # Round the final return values to three decimal places
     inliers = np.round(inliers, decimals=3)
@@ -209,28 +256,30 @@ def process_image_with_lines(img, base_line, position, interval=1, half_length=1
 
 if __name__ == "__main__":
 
-    image_path = './images/pzd1.png'
-    base_line = np.array([[100,970], [1700, 970]])
-    position = '上'
+    # image_path = './images/pzd1.png'
+    # base_line = np.array([[100,970], [1700, 970]])
+    # position = '上'
 
-    image_path = './images/pzd3.png'
-    base_line = np.array([[1050, 100], [1050, 2300]])
-    position = '右'
+    # image_path = 'images/pzd3.png'
+    # base_line = np.array([[1050, 100], [1050, 2300]])
+    # flag = '右'
 
-    image_path = './images/pzd4.png'
-    # base_line = np.array([[991, 100], [983, 2300]])
-    base_line = np.array([[971, 10], [963, 2400]])
-    position = '左'
+    image_path = 'images/pzd4.png'
+    base_line = np.array([[991, 100], [983, 2300]])
+    # base_line = np.array([[971, 10], [963, 2400]])
+    flag = 'negative'
 
-    image_path = './images/pzd2.png'
-    base_line = np.array([[100,1070], [1700, 1070]])
-    position = '下'
+    # image_path = './images/pzd2.png'
+    # base_line = np.array([[100,1070], [1700, 1070]])
+    # position = '下'
 
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     interval = 1
     half_length = 20
+    orientation = 'P'
+    peak_threshold = 10
 
-    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, position, interval, half_length)
+    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, flag, interval, half_length, orientation, peak_threshold)
     print("Inliers:", inliers)
     # print("Outliers:", outliers)
     print("Fitted Line Endpoints:", fitted_line)

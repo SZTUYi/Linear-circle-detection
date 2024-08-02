@@ -79,7 +79,7 @@ def find_first_peak(gradients, peak_threshold=10, valley_type='all'):
         return int(min(positive_peaks[0], negative_peaks[0]))
 
     else:
-        raise ValueError("valley_type must be 'positive', 'negative', or 'both'")
+        raise ValueError("valley_type must be 'positive', 'negative', or 'all'")
 
 def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_values, flag='all', peak_threshold=10):
     color_img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
@@ -97,17 +97,24 @@ def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_value
 
     return color_img, all_midpoints
 
-def generate_radial_lines(center, radius, angle_interval, line_length):
+
+def generate_radial_lines(center, radius, angle_interval, line_length, orientation='P'):
+
     angles = np.deg2rad(np.arange(0, 360, angle_interval))
     cx, cy = center
     boundary_points = np.column_stack((
         cx + radius * np.cos(angles),
         cy + radius * np.sin(angles)
     ))
-    
-    start_points = boundary_points - line_length * np.column_stack((np.cos(angles), np.sin(angles)))
-    end_points = boundary_points + line_length * np.column_stack((np.cos(angles), np.sin(angles)))
-    
+    if orientation == 'P':
+        start_points = boundary_points - line_length * np.column_stack((np.cos(angles), np.sin(angles)))
+        end_points = boundary_points + line_length * np.column_stack((np.cos(angles), np.sin(angles)))
+    elif orientation == 'N':
+        start_points = boundary_points + line_length * np.column_stack((np.cos(angles), np.sin(angles)))
+        end_points = boundary_points - line_length * np.column_stack((np.cos(angles), np.sin(angles)))
+    else:
+        raise ValueError("Invalid orientation value. Use 'P' for positive or 'N' for negative.")
+
     return np.column_stack((start_points, end_points)).reshape(-1, 2, 2)
 
 def fit_circle(points):
@@ -140,12 +147,12 @@ def remove_outliers(points, factor=0.27):
     mask = np.all((points >= lower_bound) & (points <= upper_bound), axis=1)
     return points[mask], points[~mask]
 
-def process_image(img, initial_center, initial_radius, line_length=20, flag='all', peak_threshold=10, angle_interval=1, pixel_interval=1):
+def process_image(img, initial_center, initial_radius, line_length=20, flag='all', peak_threshold=10, orientation='P', angle_interval=1, pixel_interval=1):
     """angel_interval: 角度间隔，line_length: 线段半长，pixel_interval: 像素间隔"""
     color_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     cv2.circle(color_img, tuple(map(int, initial_center)), int(initial_radius), (0, 0, 255), 2)
 
-    points = generate_radial_lines(initial_center, initial_radius, angle_interval, line_length)
+    points = generate_radial_lines(initial_center, initial_radius, angle_interval, line_length, orientation)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
     _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad, flag, peak_threshold)
@@ -153,7 +160,7 @@ def process_image(img, initial_center, initial_radius, line_length=20, flag='all
     midpoints, removed_points = remove_outliers(midpoints)
     fitted_center, fitted_radius = fit_circle(midpoints)
 
-    points = generate_radial_lines(fitted_center, fitted_radius, angle_interval, line_length-10)
+    points = generate_radial_lines(fitted_center, fitted_radius, angle_interval, line_length-10, orientation)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
     _, midpoints = draw_gradient_threshold_midpoints(img, points_interpolated, grad, flag, peak_threshold)
@@ -180,14 +187,15 @@ if __name__ == "__main__":
     angle_interval = 2
     line_length = 40
     pixel_interval = 1
-    flag = 'negative'
+    flag = 'positive'
     peak_threshold = 20
+    orientation = 'P'
 
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError(f"Unable to read image at {image_path}")
 
-    final_center, final_radius = process_image(img, initial_center, initial_radius, line_length, flag, peak_threshold)
+    final_center, final_radius = process_image(img, initial_center, initial_radius, line_length, flag, peak_threshold, orientation)
     print(f"Fitted circle center: {final_center}")
     print(f"Fitted circle radius: {final_radius}")
 
