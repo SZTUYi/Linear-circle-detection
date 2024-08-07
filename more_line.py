@@ -4,6 +4,7 @@ import math
 from sklearn.linear_model import LinearRegression
 from scipy import ndimage
 from scipy.signal import find_peaks
+from sklearn.linear_model import RANSACRegressor
 
 def calculate_pixel_values(img, points, pixel_interval):
     height, width = img.shape
@@ -68,6 +69,7 @@ def project_point_on_line(point, line_point, line_direction):
     point_vector = point - line_point
     projection_length = np.dot(point_vector, line_direction) / np.dot(line_direction, line_direction)
     projection_point = line_point + projection_length * line_direction
+    print(f"projection_point:{projection_point}")
     return projection_point
 
 
@@ -79,10 +81,103 @@ def fit_line_to_points(points):
     slope = reg.coef_[0]
     intercept = reg.intercept_
 
+    print(f"slope:{slope}, intercept:{intercept}")
+
     line_point = np.array([0, intercept])
     line_direction = np.array([1, slope])
+    print(f"line: {line_point, line_direction}")
     return line_point, line_direction
 
+# def fit_line_to_points(points):
+#         """Fit a line to the given points using RANSAC and return the direction vector and a point on the line."""
+#         if len(points) < 2:
+#             raise ValueError("At least two points are required to fit a line.")
+#
+#         X = points[:, 0].reshape(-1, 1)
+#         y = points[:, 1]
+#
+#         # RANSAC regression
+#         ransac = RANSACRegressor()
+#         ransac.fit(X, y)
+#         slope = ransac.estimator_.coef_[0]
+#         intercept = ransac.estimator_.intercept_
+#
+#         # Define the point on the line and the direction vector
+#         line_point = np.array([0, intercept])
+#         line_direction = np.array([1, slope])
+#         print(f"line: {line_point, line_direction}")
+#
+#         return line_point, line_direction
+
+
+# def fit_line(points):
+#     points = np.array(points)
+#
+#     X = points[:, 0].reshape(-1, 1)
+#     y = points[:, 1]
+#
+#     model = LinearRegression()
+#     model.fit(X, y)
+#
+#     slope = model.coef_[0]
+#     intercept = model.intercept_
+#
+#     # Check if the line is more vertical or horizontal
+#     x_range = np.max(X) - np.min(X)
+#     y_range = np.max(y) - np.min(y)
+#
+#     if x_range > y_range:
+#         # More horizontal line
+#         x_start = np.min(X)
+#         x_end = np.max(X)
+#         y_start = slope * x_start + intercept
+#         y_end = slope * x_end + intercept
+#     else:
+#         # More vertical line
+#         y_start = np.min(y)
+#         y_end = np.max(y)
+#         # Use inverse function to find x values
+#         # Be careful with vertical lines (slope close to infinity)
+#         if abs(slope) > 1e-6:
+#             x_start = (y_start - intercept) / slope
+#             x_end = (y_end - intercept) / slope
+#             start_point = np.array([x_start, y_start])
+#             end_point = np.array([x_end, y_end])
+#         else:
+#             # If line is nearly vertical, use mean x value
+#             x_start = x_end = np.mean(X)
+#             start_point = np.array([x_start, y_start])
+#             end_point = np.array([x_end, y_end])
+#
+#     return start_point, end_point
+
+def fit_line(points):
+    points = np.array(points)
+
+    # Calculate the centroid
+    centroid = np.mean(points, axis=0)
+
+    # Center the points
+    centered_points = points - centroid
+
+    # Perform SVD
+    U, _, Vt = np.linalg.svd(centered_points)
+
+    # The first right singular vector gives the direction of maximum variance
+    direction = Vt[0]
+
+    # Project points onto this direction to get the line
+    projected_points = np.outer(np.dot(centered_points, direction), direction)
+
+    # Find the points with minimum and maximum projection
+    min_proj = np.argmin(np.dot(centered_points, direction))
+    max_proj = np.argmax(np.dot(centered_points, direction))
+
+    # Calculate start and end points
+    start_point = points[min_proj]
+    end_point = points[max_proj]
+
+    return start_point, end_point
 
 def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
     """Remove outliers using the Interquartile Range (IQR) method."""
@@ -102,8 +197,10 @@ def remove_outliers(points, q1=25, q3=75, iqr_factor=0.5):
         (points[:, 1] >= lower_bound_y) & (points[:, 1] <= upper_bound_y)
     )
     
-    inliers = points[inliers_mask]
-    outliers = points[~inliers_mask]
+    # inliers = points[inliers_mask]
+    # outliers = points[~inliers_mask]
+    inliers = np.round(points[inliers_mask], decimals=1)
+    outliers = np.round(points[~inliers_mask], decimals=1)
     
     return inliers, outliers
 
@@ -154,14 +251,8 @@ def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, bas
     """Draw the midpoints of the segments with the maximum gradient."""
     all_max_points = []
     for segment_points, gradients in zip(interpolated_points, gradient_values):
-        # if flag == 'all':
-        #     max_gradient_index = np.argmax(np.abs(gradients))  # 查找绝对值最大的值 all
-        # elif flag == 'positive':
-        #     max_gradient_index = np.argmax(gradients)  # 查找最大值 positive 从黑到白
-        # elif flag == 'negative':
-        #     max_gradient_index = np.argmin(gradients)  # 查找最小值 negative 从白到黑
         max_gradient_index = find_first_peak(gradients, peak_threshold, valley_type=flag)
-        print(f"Max index ({flag}): {max_gradient_index}, Value: {gradients[max_gradient_index]}")
+        # print(f"Max index ({flag}): {max_gradient_index}, Value: {gradients[max_gradient_index]}")
         max_point = segment_points[max_gradient_index]
         # print(max_point)
         all_max_points.append(max_point)
@@ -171,15 +262,16 @@ def draw_max_gradient_midpoints(image, interpolated_points, gradient_values, bas
 
     # Remove outliers
     inliers, outliers = remove_outliers(all_max_points)
-
+    print(f"Number of inliers: {inliers}")
     # Fit a line to the inliers
-    line_point, line_direction = fit_line_to_points(inliers)
+    projected_start, projected_end = fit_line(inliers)
+    # line_point, line_direction = fit_line_to_points(inliers)
 
-    base_line_start = np.array(base_line[0])
-    base_line_end = np.array(base_line[1])
-
-    projected_start = project_point_on_line(base_line_start, line_point, line_direction)
-    projected_end = project_point_on_line(base_line_end, line_point, line_direction)
+    # base_line_start = np.array(base_line[0])
+    # base_line_end = np.array(base_line[1])
+    #
+    # projected_start = project_point_on_line(base_line_start, line_point, line_direction)
+    # projected_end = project_point_on_line(base_line_end, line_point, line_direction)
 
     inliers = np.round(inliers, decimals=3)
     outliers = np.round(outliers, decimals=3)
@@ -222,11 +314,11 @@ def generate_parallel_lines(line, interval, half_length, orientation='P'):
         end_perp_y = mid_y + half_length * perp_dy
 
         if orientation == 'P':
-            # 正向：起点在左侧，终点在右侧
+            # 正向：起点在右侧，终点在左侧
             lines.append([start_perp_x, start_perp_y])  # 起点
             lines.append([end_perp_x, end_perp_y])  # 终点
         elif orientation == 'N':
-            # 逆向：起点在右侧，终点在左侧
+            # 逆向：起点在左侧，终点在右侧
             lines.append([end_perp_x, end_perp_y])  # 起点
             lines.append([start_perp_x, start_perp_y])  # 终点
         else:
@@ -234,17 +326,18 @@ def generate_parallel_lines(line, interval, half_length, orientation='P'):
 
     return np.array(lines)
 
-def process_image_with_lines(img, base_line, flag, interval=1, half_length=10, orientation='P', peak_threshold=10, pixel_interval=3):
+def process_image_with_lines(img, base_line, position, interval=1, half_length=10, peak_threshold=10, pixel_interval=3):
     """intrval是直线间隔，half_length是半长，pixel_interval是像素间隔"""
+    if position == '左' or position == '下':
+        flag = 'positive'
+        orientation = 'N'
+    elif position == '右' or position == '上':
+        flag = 'positive'
+        orientation = 'P'
     points = generate_parallel_lines(base_line, interval, half_length, orientation)
     img, points_interpolated, pixel_values = calculate_pixel_values(img, points, pixel_interval)
     grad = calculate_gradient(pixel_values)
-    # print(grad)
-    # if position == '上' or position == '右':
-    #     flag = 'positive'
-    # elif position == '下' or position == '左':
-    #     flag = 'negative'
-    print(f"Processing image with flag: {flag}")
+    # print(f"Processing image with flag: {flag}")
     inliers, outliers, fitted_line = draw_max_gradient_midpoints(img, points_interpolated, grad, base_line, peak_threshold, flag)
 
     # Round the final return values to three decimal places
@@ -256,31 +349,37 @@ def process_image_with_lines(img, base_line, flag, interval=1, half_length=10, o
 
 if __name__ == "__main__":
 
-    # image_path = './images/pzd1.png'
+    # image_path = './images/pzd2.png'
     # base_line = np.array([[100,970], [1700, 970]])
     # position = '上'
 
     # image_path = 'images/pzd3.png'
     # base_line = np.array([[1050, 100], [1050, 2300]])
-    # flag = '右'
+    # position = '右'
 
-    image_path = 'images/pzd4.png'
-    base_line = np.array([[991, 100], [983, 2300]])
-    # base_line = np.array([[971, 10], [963, 2400]])
-    flag = 'negative'
+    # image_path = 'images/pzd4.png'
+    # base_line = np.array([[991, 100], [983, 2300]])
+    # position = '左'
 
-    # image_path = './images/pzd2.png'
+    # image_path = './images/pzd5.png'
     # base_line = np.array([[100,1070], [1700, 1070]])
     # position = '下'
 
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    interval = 1
-    half_length = 20
-    orientation = 'P'
-    peak_threshold = 10
+    image_path = 'images/t5.png'
+    base_line = np.array([[991, 100], [983, 2300]])
+    position = '左'
 
-    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, flag, interval, half_length, orientation, peak_threshold)
-    print("Inliers:", inliers)
+    # flag = 'positive'
+    # orientation = 'N'
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+    interval = 50
+    half_length = 100
+    peak_threshold = 36
+
+
+    inliers, fitted_line, outliers = process_image_with_lines(img, base_line, position, interval, half_length, peak_threshold)
+    # print("Inliers:", inliers)
     # print("Outliers:", outliers)
     print("Fitted Line Endpoints:", fitted_line)
 
@@ -291,15 +390,15 @@ if __name__ == "__main__":
     # cv2.line(viz_img, tuple(base_line[0]), tuple(base_line[1]), (0, 255, 0), 1)
 
     # Draw the inliers in green
-    # for point in inliers:
-    #     cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 255, 0), -1)
+    for point in inliers:
+        cv2.circle(viz_img, tuple(point.astype(int)), 5, (0, 255, 0), -1)
 
     # Draw the outliers in red
-    # for point in outliers:
-    #     cv2.circle(viz_img, tuple(point.astype(int)), 3, (0, 0, 255), -1)
+    for point in outliers:
+        cv2.circle(viz_img, tuple(point.astype(int)), 5, (0, 0, 255), -1)
 
     # Draw the fitted line in blue
-    cv2.line(viz_img, tuple(fitted_line[0].astype(int)), tuple(fitted_line[1].astype(int)), (255, 0, 0), 1)
+    cv2.line(viz_img, tuple(fitted_line[0].astype(int)), tuple(fitted_line[1].astype(int)), (255, 0, 0), 2)
 
     # Create a window and display the image
     cv2.namedWindow('Image with Fitted Line', cv2.WINDOW_NORMAL)
