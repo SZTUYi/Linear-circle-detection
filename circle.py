@@ -87,7 +87,7 @@ def draw_gradient_threshold_midpoints(image, interpolated_points, gradient_value
     # print(gradient_values)
     for segment_points, gradients in zip(interpolated_points, gradient_values):
         max_gradient_index = find_first_peak(gradients, peak_threshold, valley_type=flag)
-        print(f"Max index ({flag}): {max_gradient_index}, Value: {gradients[max_gradient_index]}")
+        # print(f"Max index ({flag}): {max_gradient_index}, Value: {gradients[max_gradient_index]}")
         if max_gradient_index < len(segment_points) - 1:
             midpoint = tuple(map(int, (segment_points[max_gradient_index] + segment_points[max_gradient_index + 1]) / 2))
         else:
@@ -181,11 +181,11 @@ def process_image(img, initial_center, initial_radius, line_length=20, flag='all
     return final_fitted_center, final_fitted_radius
 
 if __name__ == "__main__":
-    image_path = './images/23.png'
-    initial_center = (1200, 980)
-    initial_radius = 100
-    angle_interval = 2
-    line_length = 40
+    image_path = './images/t1.png'
+    initial_center = (1000, 1170)
+    initial_radius = 200
+    angle_interval = 1
+    line_length = 50
     pixel_interval = 1
     flag = 'positive'
     peak_threshold = 20
